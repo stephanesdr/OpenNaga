@@ -178,6 +178,11 @@ fn with_lock<T>(path: &Path, operation: impl FnOnce() -> Result<T>) -> Result<T>
     create_private_dir(folder)?;
     let mut lock_name = path.as_os_str().to_owned();
     lock_name.push(".lock");
+    // Prevent path traversal attacks by rejecting paths containing '..'.
+    let lock_path = PathBuf::from(&lock_name);
+    if lock_path.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err(ProfileDataError(format!("Invalid input: {}", lock_path.display())));
+    }
     let lock = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -185,7 +190,7 @@ fn with_lock<T>(path: &Path, operation: impl FnOnce() -> Result<T>) -> Result<T>
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(PathBuf::from(lock_name))
+        .open(lock_path)
         .map_err(|_| ProfileDataError("Cannot reserve the profiles file for saving.".into()))?;
     use std::os::fd::AsRawFd;
     let fd = lock.as_raw_fd();
@@ -217,7 +222,12 @@ pub fn write_private(data: &[u8], destination: &Path) -> Result<()> {
         return Err(io_error(std::io::Error::last_os_error()));
     }
     template.pop();
+    // Prevent path traversal attacks by rejecting paths containing '..'.
     let temporary = PathBuf::from(std::ffi::OsStr::from_bytes(&template));
+    if temporary.components().any(|c| c == std::path::Component::ParentDir) {
+        unsafe { libc::close(fd) };
+        return Err(ProfileDataError(format!("Invalid input: {}", temporary.display())));
+    }
     let result = (|| {
         let mut offset = 0;
         while offset < data.len() {
