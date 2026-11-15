@@ -471,6 +471,10 @@ pub fn same_receiver(a: &str, b: &str) -> bool {
 }
 
 pub fn load(path: &Path) -> Result<State> {
+    // Prevent path traversal attacks by rejecting paths containing '..'.
+    if path.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err(RazerError::InvalidValue(format!("Invalid input: {}", path.display())));
+    }
     let data = std::fs::read(path).map_err(|e| RazerError::Malformed(format!("Mouse backup unreadable: {e}.")))?;
     let state: State = serde_json::from_slice(&data).map_err(|e| RazerError::Malformed(format!("Mouse backup unreadable: {e}.")))?;
     if state.identity.is_empty() {
@@ -522,6 +526,10 @@ pub fn save(plan: &OnboardProfilePlan, session: &mut Session, identity: &str, pa
     }
     if session.read_mode()? != 0 {
         return Err(RazerError::InvalidValue("Turn off driver mode before saving to the mouse.".into()));
+    }
+    // Prevent path traversal attacks by rejecting paths containing '..'.
+    if path.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err(RazerError::InvalidValue(format!("Invalid input: {}", path.display())));
     }
     let previous_data = if path.exists() { Some(std::fs::read(path).map_err(|e| RazerError::Transport(e.to_string()))?) } else { None };
     let previous = if previous_data.is_some() { Some(load(path)?) } else { None };
